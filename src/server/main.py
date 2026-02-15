@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     # STT
     stt_model: str = "base"  # tiny, base, small, medium, large-v3-turbo
     stt_device: str = "auto"  # auto, cpu, cuda, mps
+    stt_server_url: Optional[str] = None  # Remote whisper.cpp server URL
     
     # TTS
     tts_model: str = "chatterbox"
@@ -93,10 +94,14 @@ async def startup():
         logger.warning("⚠️ Authentication DISABLED (dev mode)")
     
     # Initialize STT
-    logger.info(f"Loading STT model: {settings.stt_model}")
+    if settings.stt_server_url:
+        logger.info(f"Using remote STT server: {settings.stt_server_url}")
+    else:
+        logger.info(f"Loading STT model: {settings.stt_model}")
     stt = WhisperSTT(
         model_name=settings.stt_model,
         device=settings.stt_device,
+        server_url=settings.stt_server_url,
     )
     
     # Initialize TTS
