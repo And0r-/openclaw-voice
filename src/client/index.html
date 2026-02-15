@@ -309,7 +309,7 @@
         let mediaRecorder = null;
         let audioContext = null;
         let audioSource = null;
-        let audioProcessor = null;
+        let audioWorkletNode = null;
         let mediaStream = null;
         let isRecording = false;
         let continuousMode = false;
@@ -537,43 +537,67 @@
             try {
                 // Reuse stream if available, otherwise get new one
                 if (!mediaStream) {
-                    mediaStream = await navigator.mediaDevices.getUserMedia({ 
+                    mediaStream = await navigator.mediaDevices.getUserMedia({
                         audio: {
-                            sampleRate: 16000,
                             channelCount: 1,
-                            echoCancellation: true,
-                            noiseSuppression: true,
+                            echoCancellation: false,
+                            noiseSuppression: false,
+                            autoGainControl: false,
                         }
                     });
                 }
                 
-                audioContext = new AudioContext({ sampleRate: 16000 });
+                audioContext = new AudioContext();
+                const nativeSampleRate = audioContext.sampleRate;
+
+                // Register AudioWorklet processor (runs on audio thread - no crackling)
+                const workletCode = `
+                    class AudioSender extends AudioWorkletProcessor {
+                        process(inputs) {
+                            const input = inputs[0][0];
+                            if (input) {
+                                this.port.postMessage(input.slice());
+                            }
+                            return true;
+                        }
+                    }
+                    registerProcessor('audio-sender', AudioSender);
+                `;
+                const blob = new Blob([workletCode], { type: 'application/javascript' });
+                const workletUrl = URL.createObjectURL(blob);
+                await audioContext.audioWorklet.addModule(workletUrl);
+                URL.revokeObjectURL(workletUrl);
+
                 audioSource = audioContext.createMediaStreamSource(mediaStream);
-                audioProcessor = audioContext.createScriptProcessor(4096, 1, 1);
-                
+                audioWorkletNode = new AudioWorkletNode(audioContext, 'audio-sender');
+
                 let lastSoundTime = Date.now();
-                
-                audioProcessor.onaudioprocess = (e) => {
+
+                // Tell server our sample rate
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'set_sample_rate', sample_rate: nativeSampleRate }));
+                }
+
+                audioWorkletNode.port.onmessage = (e) => {
                     if (isRecording && ws && ws.readyState === WebSocket.OPEN) {
-                        const audioData = e.inputBuffer.getChannelData(0);
+                        const audioData = e.data;
                         const base64 = float32ToBase64(audioData);
                         ws.send(JSON.stringify({ type: 'audio', data: base64 }));
-                        
+
                         // Simple VAD: check if audio has energy
                         if (continuousMode) {
                             const energy = audioData.reduce((sum, val) => sum + Math.abs(val), 0) / audioData.length;
                             if (energy > 0.01) {
                                 lastSoundTime = Date.now();
                             } else if (Date.now() - lastSoundTime > silenceThreshold) {
-                                // Silence detected - stop recording
                                 stopRecording();
                             }
                         }
                     }
                 };
-                
-                audioSource.connect(audioProcessor);
-                audioProcessor.connect(audioContext.destination);
+
+                audioSource.connect(audioWorkletNode);
+                audioWorkletNode.connect(audioContext.destination);
                 
                 isRecording = true;
                 voiceBtn.classList.add('listening');
@@ -593,10 +617,10 @@
             voiceBtn.classList.remove('listening');
             voiceBtn.textContent = continuousMode ? 'Tap to Talk' : 'Hold to Talk';
             
-            // Disconnect processor but keep stream for continuous mode
-            if (audioProcessor) {
-                audioProcessor.disconnect();
-                audioProcessor = null;
+            // Disconnect worklet but keep stream for continuous mode
+            if (audioWorkletNode) {
+                audioWorkletNode.disconnect();
+                audioWorkletNode = null;
             }
             if (audioSource) {
                 audioSource.disconnect();

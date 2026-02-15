@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     # STT
     stt_model: str = "base"  # tiny, base, small, medium, large-v3-turbo
     stt_device: str = "auto"  # auto, cpu, cuda, mps
+    stt_language: str = "en"  # Language code (en, de, auto, etc.)
     stt_server_url: Optional[str] = None  # Remote whisper.cpp server URL
     
     # TTS
@@ -101,6 +102,7 @@ async def startup():
     stt = WhisperSTT(
         model_name=settings.stt_model,
         device=settings.stt_device,
+        language=settings.stt_language,
         server_url=settings.stt_server_url,
     )
     
@@ -253,24 +255,36 @@ async def websocket_endpoint(websocket: WebSocket):
     audio_buffer = []
     is_listening = False
     session_start = None
-    
+    client_sample_rate = 16000  # Default, updated by client
+
     try:
         while True:
             data = await websocket.receive_text()
             msg = json.loads(data)
-            
-            if msg["type"] == "start_listening":
+
+            if msg["type"] == "set_sample_rate":
+                client_sample_rate = int(msg["sample_rate"])
+                logger.debug(f"Client sample rate: {client_sample_rate}")
+
+            elif msg["type"] == "start_listening":
                 is_listening = True
                 audio_buffer = []
                 await websocket.send_json({"type": "listening_started"})
                 logger.debug("Started listening")
-                
+
             elif msg["type"] == "stop_listening":
                 is_listening = False
-                
+
                 if audio_buffer:
                     # Combine audio chunks
                     audio_data = np.concatenate(audio_buffer)
+
+                    # Resample to 16kHz if client sends higher rate
+                    if client_sample_rate != 16000:
+                        import scipy.signal
+                        samples_16k = int(len(audio_data) * 16000 / client_sample_rate)
+                        audio_data = scipy.signal.resample(audio_data, samples_16k).astype(np.float32)
+                        logger.debug(f"Resampled {client_sample_rate}Hz -> 16kHz")
                     
                     # Transcribe
                     logger.debug("Transcribing audio...")
