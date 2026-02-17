@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # Auth
     require_auth: bool = False  # Set True for production
     master_key: Optional[str] = None  # Admin key for full access
+    public_mode: bool = False  # When True, hint AI that others may be listening
     
     # STT
     stt_model: str = "base"  # tiny, base, small, medium, large-v3-turbo
@@ -124,17 +125,25 @@ async def startup():
     if gateway_url and gateway_token:
         # Use OpenClaw gateway (connects to Aria!)
         logger.info(f"🦞 Connecting to OpenClaw gateway: {gateway_url}")
+        voice_prompt = (
+            "This conversation is happening via real-time voice chat. "
+            "Keep responses concise and conversational — a few sentences "
+            "at most unless the topic genuinely needs depth. "
+            "No markdown, bullet points, code blocks, or special formatting."
+        )
+        if settings.public_mode:
+            voice_prompt += (
+                " IMPORTANT: Other people may be listening to this conversation. "
+                "Keep everything appropriate and professional. Avoid anything "
+                "embarrassing, private, or sensitive."
+            )
+            logger.info("🔇 Public mode ENABLED")
         backend = AIBackend(
             backend_type="openai",  # Gateway speaks OpenAI API
             url=f"{gateway_url}/v1",
-            model="openclaw:voice",  # Maps to 'voice' agent in config
+            model="openclaw:voice",
             api_key=gateway_token,
-            system_prompt=(
-                "This conversation is happening via real-time voice chat. "
-                "Keep responses concise and conversational — a few sentences "
-                "at most unless the topic genuinely needs depth. "
-                "No markdown, bullet points, code blocks, or special formatting."
-            ),
+            system_prompt=voice_prompt,
         )
     else:
         # Fallback to direct OpenAI
