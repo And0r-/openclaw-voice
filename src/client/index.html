@@ -271,7 +271,16 @@
             <span class="toggle-label">Continuous Mode</span>
             <span class="toggle-hint">(hands-free, like Grok)</span>
         </div>
-        
+
+        <div class="continuous-toggle" id="publicModeRow" style="display: none;">
+            <label class="toggle-switch">
+                <input type="checkbox" id="publicMode">
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-label">Public Mode</span>
+            <span class="toggle-hint">(others listening)</span>
+        </div>
+
         <p class="status" id="status">Ready</p>
         
         <div class="transcript-box">
@@ -303,6 +312,8 @@
         const transcriptEl = document.getElementById('transcript');
         const errorEl = document.getElementById('error');
         const clearBtn = document.getElementById('clearBtn');
+        const publicModeRow = document.getElementById('publicModeRow');
+        const publicModeToggle = document.getElementById('publicMode');
         const continuousModeToggle = document.getElementById('continuousMode');
         
         let ws = null;
@@ -374,6 +385,11 @@
         
         function handleMessage(msg) {
             switch (msg.type) {
+                case 'config':
+                    if (msg.public_mode_available) {
+                        publicModeRow.style.display = 'flex';
+                    }
+                    break;
                 case 'listening_started':
                     setStatus(continuousMode ? '🎙️ Listening (continuous)...' : 'Listening...', true);
                     break;
@@ -738,6 +754,12 @@
         });
         
         // Continuous mode toggle
+        publicModeToggle.addEventListener('change', (e) => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'set_public_mode', enabled: e.target.checked }));
+            }
+        });
+
         continuousModeToggle.addEventListener('change', (e) => {
             continuousMode = e.target.checked;
             voiceBtn.textContent = continuousMode ? 'Tap to Talk' : 'Hold to Talk';

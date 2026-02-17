@@ -125,25 +125,19 @@ async def startup():
     if gateway_url and gateway_token:
         # Use OpenClaw gateway (connects to Aria!)
         logger.info(f"🦞 Connecting to OpenClaw gateway: {gateway_url}")
-        voice_prompt = (
-            "This conversation is happening via real-time voice chat. "
-            "Keep responses concise and conversational — a few sentences "
-            "at most unless the topic genuinely needs depth. "
-            "No markdown, bullet points, code blocks, or special formatting."
-        )
         if settings.public_mode:
-            voice_prompt += (
-                " IMPORTANT: Other people may be listening to this conversation. "
-                "Keep everything appropriate and professional. Avoid anything "
-                "embarrassing, private, or sensitive."
-            )
-            logger.info("🔇 Public mode ENABLED")
+            logger.info("🔇 Public mode feature AVAILABLE")
         backend = AIBackend(
             backend_type="openai",  # Gateway speaks OpenAI API
             url=f"{gateway_url}/v1",
             model="openclaw:voice",
             api_key=gateway_token,
-            system_prompt=voice_prompt,
+            system_prompt=(
+                "This conversation is happening via real-time voice chat. "
+                "Keep responses concise and conversational — a few sentences "
+                "at most unless the topic genuinely needs depth. "
+                "No markdown, bullet points, code blocks, or special formatting."
+            ),
         )
     else:
         # Fallback to direct OpenAI
@@ -264,11 +258,18 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.info("Client connected (auth disabled)")
     
     await websocket.accept()
-    
+
     audio_buffer = []
     is_listening = False
     session_start = None
     client_sample_rate = 16000  # Default, updated by client
+    public_mode_active = False  # Toggled by client
+
+    # Send config to client
+    await websocket.send_json({
+        "type": "config",
+        "public_mode_available": settings.public_mode,
+    })
 
     try:
         while True:
@@ -278,6 +279,10 @@ async def websocket_endpoint(websocket: WebSocket):
             if msg["type"] == "set_sample_rate":
                 client_sample_rate = int(msg["sample_rate"])
                 logger.debug(f"Client sample rate: {client_sample_rate}")
+
+            elif msg["type"] == "set_public_mode":
+                public_mode_active = msg.get("enabled", False)
+                logger.info(f"Public mode: {'ON' if public_mode_active else 'OFF'}")
 
             elif msg["type"] == "start_listening":
                 is_listening = True
@@ -340,8 +345,17 @@ async def websocket_endpoint(websocket: WebSocket):
                         sentence_buffer = ""
                         audio_chunks = []
                         
+                        # Prepend public mode hint if active
+                        user_msg = transcript
+                        if public_mode_active:
+                            user_msg = (
+                                "[CONTEXT: Other people are listening to this conversation. "
+                                "Keep everything appropriate, professional, and not embarrassing.]\n\n"
+                                + transcript
+                            )
+
                         # Stream response and synthesize sentences as they complete
-                        async for chunk in backend.chat_stream(transcript):
+                        async for chunk in backend.chat_stream(user_msg):
                             full_response += chunk
                             sentence_buffer += chunk
                             
