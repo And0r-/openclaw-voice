@@ -29,6 +29,7 @@ dependencies = [
     "scipy>=1.11.0",
     "loguru>=0.7.2",
     "python-dotenv>=1.0.0",
+    "elevenlabs>=2.35.0",
 ]
 
 [project.optional-dependencies]

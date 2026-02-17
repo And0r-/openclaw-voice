@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     # TTS
     tts_model: str = "chatterbox"
     tts_voice: Optional[str] = None  # Path to voice sample for cloning
+    elevenlabs_api_key: Optional[str] = None
+    elevenlabs_voice_id: Optional[str] = None
     
     # AI Backend
     backend_type: str = "openai"  # openai, openclaw, custom
@@ -58,9 +60,9 @@ class Settings(BaseSettings):
     backend_model: str = "gpt-4o-mini"
     openai_api_key: Optional[str] = None
     
-    # OpenClaw Gateway (auto-detected from OPENCLAW_GATEWAY_URL + TOKEN)
-    openclaw_gateway_url: Optional[str] = None
-    openclaw_gateway_token: Optional[str] = None
+    # OpenClaw Gateway (OPENCLAW_GATEWAY_URL + OPENCLAW_GATEWAY_TOKEN)
+    gateway_url: Optional[str] = None
+    gateway_token: Optional[str] = None
     
     # Audio
     sample_rate: int = 16000
@@ -110,12 +112,14 @@ async def startup():
     logger.info(f"Loading TTS model: {settings.tts_model}")
     tts = ChatterboxTTS(
         voice_sample=settings.tts_voice,
+        voice_id=settings.elevenlabs_voice_id,
+        elevenlabs_api_key=settings.elevenlabs_api_key,
     )
     
     # Initialize AI backend
     # Auto-detect OpenClaw gateway
-    gateway_url = settings.openclaw_gateway_url or os.getenv("OPENCLAW_GATEWAY_URL")
-    gateway_token = settings.openclaw_gateway_token or os.getenv("OPENCLAW_GATEWAY_TOKEN")
+    gateway_url = settings.gateway_url
+    gateway_token = settings.gateway_token
     
     if gateway_url and gateway_token:
         # Use OpenClaw gateway (connects to Aria!)
@@ -285,18 +289,40 @@ async def websocket_endpoint(websocket: WebSocket):
                         samples_16k = int(len(audio_data) * 16000 / client_sample_rate)
                         audio_data = scipy.signal.resample(audio_data, samples_16k).astype(np.float32)
                         logger.debug(f"Resampled {client_sample_rate}Hz -> 16kHz")
-                    
+
+                    # Skip transcription if audio is too quiet (silence)
+                    energy = float(np.mean(np.abs(audio_data)))
+                    if energy < 0.005:
+                        logger.debug(f"Skipping silent audio (energy={energy:.5f})")
+                        audio_buffer = []
+                        await websocket.send_json({"type": "no_speech"})
+                        continue
+
                     # Transcribe
                     logger.debug("Transcribing audio...")
                     transcript = await stt.transcribe(audio_data)
-                    
+
+                    # Filter Whisper hallucinations (common phrases on silence/noise)
+                    _hallucinations = {
+                        "vielen dank", "vielen dank.", "danke.", "danke",
+                        "thank you", "thank you.", "thanks for watching",
+                        "thanks for watching.", "untertitelung im auftrag",
+                        "untertitel von", "bis zum nächsten mal",
+                        "copyright wtf", "tschüss", "tschüss.",
+                    }
+                    if transcript.strip().lower() in _hallucinations:
+                        logger.debug(f"Filtered hallucination: '{transcript.strip()}'")
+                        audio_buffer = []
+                        await websocket.send_json({"type": "no_speech"})
+                        continue
+
                     await websocket.send_json({
                         "type": "transcript",
                         "text": transcript,
                         "final": True,
                     })
                     logger.info(f"Transcript: {transcript}")
-                    
+
                     if transcript.strip():
                         # Stream AI response with progressive TTS
                         logger.debug("Streaming AI response...")

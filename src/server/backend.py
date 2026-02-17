@@ -36,9 +36,16 @@ class AIBackend:
         if self.backend_type == "openai":
             try:
                 from openai import AsyncOpenAI
+                extra_kwargs = {}
+                if self.url and self.url != "https://api.openai.com/v1":
+                    extra_kwargs["base_url"] = self.url
+                    # OpenClaw Gateway: set agent header
+                    extra_kwargs["default_headers"] = {
+                        "x-openclaw-agent-id": "voice",
+                    }
                 self._client = AsyncOpenAI(
                     api_key=self.api_key,
-                    base_url=self.url if self.url != "https://api.openai.com/v1" else None,
+                    **extra_kwargs,
                 )
                 logger.info(f"✅ OpenAI client ready (model: {self.model})")
             except ImportError:
@@ -97,8 +104,9 @@ class AIBackend:
             response = await self._client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=500,  # Allow longer for voice
+                max_tokens=500,
                 temperature=0.7,
+                user="voice-chat",
             )
             
             assistant_message = response.choices[0].message.content
@@ -136,6 +144,7 @@ class AIBackend:
                 max_tokens=500,
                 temperature=0.7,
                 stream=True,
+                user="voice-chat",
             )
             
             async for chunk in stream:

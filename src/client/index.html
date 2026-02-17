@@ -380,6 +380,15 @@
                 case 'listening_stopped':
                     setStatus('Processing...');
                     break;
+                case 'no_speech':
+                    // No speech detected — restart listening in continuous mode
+                    if (continuousMode) {
+                        setStatus('🎙️ Listening (continuous)...', true);
+                        setTimeout(() => { if (continuousMode) startRecording(); }, 300);
+                    } else {
+                        setStatus('Ready');
+                    }
+                    break;
                 case 'transcript':
                     addTranscript('You', msg.text, 'user');
                     setStatus('Getting response...');

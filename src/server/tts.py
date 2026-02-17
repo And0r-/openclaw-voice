@@ -19,19 +19,21 @@ class ChatterboxTTS:
         voice_sample: Optional[str] = None,
         device: str = "auto",
         voice_id: Optional[str] = None,  # ElevenLabs voice ID
+        elevenlabs_api_key: Optional[str] = None,
     ):
         self.voice_sample = voice_sample
         self.device = device
         self.voice_id = voice_id or "cgSgspJ2msm6clMCkdW9"  # Jessica
+        self._elevenlabs_api_key = elevenlabs_api_key
         self.model = None
         self._backend = "mock"
         self._elevenlabs_client = None
         self._load_model()
-    
+
     def _load_model(self):
         """Load the TTS model."""
         # Try ElevenLabs first (cloud, high quality)
-        elevenlabs_key = os.environ.get("ELEVENLABS_API_KEY")
+        elevenlabs_key = self._elevenlabs_api_key or os.environ.get("ELEVENLABS_API_KEY")
         if elevenlabs_key:
             try:
                 from elevenlabs import ElevenLabs
