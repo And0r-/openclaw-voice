@@ -1,0 +1,21 @@
+# Lightweight image for remote STT (whisper.cpp server) + cloud TTS (ElevenLabs)
+# No GPU, no torch, no local Whisper — just the web server
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir uv
+
+COPY pyproject.toml uv.lock ./
+COPY src/ ./src/
+
+RUN uv venv && \
+    . .venv/bin/activate && \
+    uv pip install --no-cache-dir -e .
+
+EXPOSE 8765
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8765/')" || exit 1
+
+CMD [".venv/bin/python", "-m", "uvicorn", "src.server.main:app", "--host", "0.0.0.0", "--port", "8765"]

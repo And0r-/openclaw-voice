@@ -1,0 +1,18 @@
+services:
+  openclaw-voice:
+    build:
+      dockerfile: Dockerfile.prod
+    ports:
+      - "${OPENCLAW_PORT:-8765}:8765"
+    env_file:
+      - .env
+    environment:
+      - OPENCLAW_HOST=0.0.0.0
+      - OPENCLAW_PORT=8765
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
